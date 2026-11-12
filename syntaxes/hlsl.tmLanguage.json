@@ -1,0 +1,9 @@
+{
+  "name": "HLSL",
+  "scopeName": "source.hlsl",
+  "patterns": [
+    {
+      "include": "source.shaderlab"
+    }
+  ]
+}

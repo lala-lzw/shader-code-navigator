@@ -1,0 +1,58 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "ShaderLab/HLSL",
+  "scopeName": "source.shaderlab",
+  "patterns": [
+    {"include": "#comments"},
+    {"include": "#preprocessor"},
+    {"include": "#strings"},
+    {"include": "#shader-structure"},
+    {"include": "#types"},
+    {"include": "#functions"},
+    {"include": "#numbers"}
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {"name": "comment.line.double-slash.shader", "match": "//.*$"},
+        {"name": "comment.block.shader", "begin": "/\\*", "end": "\\*/"}
+      ]
+    },
+    "preprocessor": {
+      "patterns": [
+        {"name": "keyword.control.directive.shader", "match": "^[ \\t]*#\\s*[A-Za-z_][A-Za-z0-9_]*"},
+        {"name": "entity.name.filename.shader", "match": "[A-Za-z0-9_./\\\\-]+\\.(hlsl|cginc|inc|shader|compute)\\b"},
+        {"name": "variable.other.macro.shader", "match": "\\b[A-Z][A-Z0-9_]{2,}\\b"}
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {"name": "string.quoted.double.shader", "begin": "\"", "end": "\"", "patterns": [{"name": "constant.character.escape.shader", "match": "\\\\."}]},
+        {"name": "string.quoted.single.shader", "begin": "'", "end": "'", "patterns": [{"name": "constant.character.escape.shader", "match": "\\\\."}]}
+      ]
+    },
+    "shader-structure": {
+      "patterns": [
+        {"name": "entity.name.type.shader", "match": "\\b(Shader|SubShader|Pass|Properties|Tags|Fallback|HLSLPROGRAM|ENDHLSL|CGPROGRAM|ENDCG)\\b"},
+        {"name": "keyword.other.render-state.shader", "match": "\\b(Blend|BlendOp|ColorMask|Cull|ZClip|ZTest|ZWrite|Stencil|Offset|AlphaToMask|Fog|LOD|UsePass)\\b"}
+      ]
+    },
+    "types": {
+      "patterns": [
+        {"name": "storage.type.shader", "match": "\\b(bool|bool[2-4]|int|int[2-4]|uint|uint[2-4]|half|half[2-4]|float|float[2-4]|double|double[2-4]|fixed|fixed[2-4]|sampler[A-Za-z0-9_]*|Texture[1-3]D|TextureCube|SamplerState|StructuredBuffer|RW[A-Za-z0-9_]+)\\b"},
+        {"name": "storage.modifier.shader", "match": "\\b(static|const|uniform|volatile|precise|in|out|inout|row_major|column_major|inline|noinline)\\b"}
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {"name": "entity.name.function.shader", "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()"},
+        {"name": "support.function.shader", "match": "\\b(abs|acos|all|any|asin|atan|atan2|ceil|clamp|clip|cos|cross|ddx|ddy|dot|exp|exp2|floor|frac|fwidth|lerp|length|log|log2|max|min|mul|normalize|pow|rcp|reflect|refract|round|rsqrt|saturate|sign|sin|smoothstep|sqrt|step|tan|tex2D|tex2Dlod|tex2Dproj|tex3D)\\b"}
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {"name": "constant.numeric.shader", "match": "\\b(0[xX][0-9A-Fa-f]+|[0-9]+(\\.[0-9]*)?([eE][+-]?[0-9]+)?[fFhH]?)\\b"}
+      ]
+    }
+  }
+}

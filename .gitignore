@@ -1,0 +1,7 @@
+node_modules/
+out/
+/test/
+*.vsix
+*.log
+.vscode-test/
+*.zip

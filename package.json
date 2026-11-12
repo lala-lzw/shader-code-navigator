@@ -1,0 +1,159 @@
+{
+  "name": "shader-code-navigator",
+  "displayName": "Shader Code Navigator",
+  "description": "Standalone ShaderLab and HLSL navigation, completion, and symbol indexing for Visual Studio Code.",
+  "version": "0.1.1",
+  "publisher": "standalone-tools",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:shaderlab",
+    "onLanguage:hlsl",
+    "onCommand:shaderNavigator.rebuildIndex",
+    "onCommand:shaderNavigator.openSymbolSearch",
+    "onLanguage:UnityShader",
+    "onStartupFinished",
+    "onCommand:shaderNavigator.diagnose"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "shaderlab",
+        "aliases": [
+          "ShaderLab",
+          "Unity Shader"
+        ],
+        "extensions": [
+          ".shader",
+          ".shaderlab"
+        ],
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "hlsl",
+        "aliases": [
+          "HLSL",
+          "Shader Include"
+        ],
+        "extensions": [
+          ".hlsl",
+          ".cginc",
+          ".compute",
+          ".inc",
+          ".hlsli"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "shaderlab",
+        "scopeName": "source.shaderlab",
+        "path": "./syntaxes/shaderlab.tmLanguage.json"
+      },
+      {
+        "language": "hlsl",
+        "scopeName": "source.hlsl",
+        "path": "./syntaxes/hlsl.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "shaderNavigator.rebuildIndex",
+        "title": "Shader Navigator: Rebuild Index"
+      },
+      {
+        "command": "shaderNavigator.openSymbolSearch",
+        "title": "Shader Navigator: Open Symbol Search"
+      },
+      {
+        "command": "shaderNavigator.diagnose",
+        "title": "Shader Navigator: Diagnose Active File"
+      }
+    ],
+    "configuration": {
+      "title": "Shader Code Navigator",
+      "properties": {
+        "shaderNavigator.includePaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional include search paths. Paths may be workspace-relative or absolute."
+        },
+        "shaderNavigator.exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/node_modules/**",
+            "**/Library/**",
+            "**/Temp/**",
+            "**/obj/**",
+            "**/bin/**"
+          ],
+          "description": "Glob patterns excluded from the Shader Navigator index."
+        },
+        "shaderNavigator.maxFiles": {
+          "type": "number",
+          "default": 20000,
+          "minimum": 1,
+          "description": "Maximum number of shader-like files to index."
+        }
+      }
+    },
+    "configurationDefaults": {
+      "[shaderlab]": {
+        "editor.quickSuggestions": {
+          "other": true,
+          "comments": false,
+          "strings": true
+        }
+      },
+      "[hlsl]": {
+        "editor.quickSuggestions": {
+          "other": true,
+          "comments": false,
+          "strings": true
+        }
+      },
+      "[UnityShader]": {
+        "editor.quickSuggestions": {
+          "other": true,
+          "comments": false,
+          "strings": true
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "test": "npm run compile && node ./out/test/parser.test.js",
+    "package": "npm run compile",
+    "vsix": "npm run compile && npx --yes @vscode/vsce package --no-dependencies",
+    "test:integration": "npm run compile && node scripts/integration.cjs"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/test-electron": "^3.1.0",
+    "typescript": "^5.4.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lala-lzw/shader-code-navigator.git"
+  },
+  "homepage": "https://github.com/lala-lzw/shader-code-navigator#readme",
+  "bugs": {
+    "url": "https://github.com/lala-lzw/shader-code-navigator/issues"
+  }
+}
