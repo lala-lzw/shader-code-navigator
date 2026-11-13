@@ -118,7 +118,7 @@ export function parseShaderDocument(source: string): ParsedShaderDocument {
     if (!isPrototype) {
       functions.push({ body: { start: bodyStart, end }, symbol });
       for (const parameter of parameters) {
-        add(parameter.name, 'variable', parameter.start, parameter.start + parameter.name.length, parameter.label, { typeName: parameter.typeName, scope: { start: opening, end }, containerName: name });
+        add(parameter.name, 'variable', parameter.start, parameter.start + parameter.name.length, parameter.label, { typeName: parameter.typeName, scope: { start: opening, end }, containerName: name, isParameter: true });
       }
     }
   }
@@ -134,7 +134,7 @@ export function parseShaderDocument(source: string): ParsedShaderDocument {
       const enclosing = [...braces.entries()].filter(([open, close]) => open < start && close >= start).sort((a, b) => b[0] - a[0])[0];
       scope = { start: enclosing?.[0] ?? containingFunction.body.start, end: Math.min(source.length, (enclosing?.[1] ?? containingFunction.body.end) + 1) };
     }
-    add(match[2], 'variable', start, start + match[2].length, typeName + ' ' + match[2], { typeName, scope, containerName: containingFunction?.symbol.name ?? aggregate?.name, isMember: aggregate?.kind === 'struct' && !containingFunction });
+    add(match[2], 'variable', start, start + match[2].length, typeName + ' ' + match[2], { typeName, scope, containerName: containingFunction?.symbol.name ?? aggregate?.name, isMember: aggregate?.kind === 'struct' && !containingFunction, isReadonly: /\bconst\b/.test(match[0].slice(0, match[0].indexOf(typeName))) });
   }
   symbols.sort((left, right) => left.selectionRange.start - right.selectionRange.start);
   return { symbols, includes: parseIncludes(source, sanitized), code: sanitized };

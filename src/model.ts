@@ -33,6 +33,8 @@ export interface ShaderSymbol {
   parameters?: { name: string; label: string; typeName: string }[];
   isMember?: boolean;
   isPrototype?: boolean;
+  isParameter?: boolean;
+  isReadonly?: boolean;
 }
 
 export interface ParsedShaderDocument {

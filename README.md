@@ -20,6 +20,18 @@ Standalone ShaderLab / HLSL navigation and completion for Visual Studio Code. Co
 
 支持 `.shader`、`.shaderlab`、`.hlsl`、`.hlsli`、`.cginc`、`.compute`、`.inc`，包括语法高亮、括号配对、注释与折叠。文件编辑后实时更新，包括尚未保存的内容。
 
+## C# 风格配色
+
+默认提供 Shader 专用语义配色，兼容 `shaderlab`、`hlsl` 和 Unity 官方扩展的 `UnityShader` 模式。函数声明与调用统一为绿色，结构体和资源类型为青色，变量与参数为浅蓝色；关键字蓝色、流程控制紫色、宏淡紫色、字符串橙色、注释暗绿色。浅色主题自动使用对应的深色字色，高对比度主题跟随主题设置。
+
+![Shader 配色示意，按扩展实际分类和调色板生成](docs/highlighting.png)
+
+配色依据源码符号和词法类别区分，`if/for/return` 不会当作函数；类型构造、注释、字符串和 include 路径也分别处理。只影响 Shader 文件，无需切换整个编辑器主题。
+
+需要跟随当前主题的标准颜色时，设置 `shaderNavigator.highlighting.style` 为 `theme`；关闭额外语义着色可将 `shaderNavigator.highlighting.enabled` 设为 `false`。VS Code 中显式设置的 `editor.semanticHighlighting.enabled: false` 优先于扩展默认值。
+
+函数颜色还可通过用户设置 `editor.semanticTokenColorCustomizations.rules.shaderFunction`（深色主题）和 `shaderFunctionLight`（浅色主题）自定义。
+
 ## include 路径
 
 依次搜索：当前文件目录、打开的工作区根目录、配置的 include 目录，最后尝试工作区中唯一匹配的路径或文件名。支持递归 include、循环 include 和 `#include_with_pragmas`。补全和符号跳转按当前文件的 include 依赖链及局部作用域查找，避免其它 Shader 的同名函数混进候选。
@@ -55,6 +67,10 @@ Node.js 18 或以上版本：
 直接打开本目录并按 `F5` 可运行开发扩展。入口为 `src/extension.ts`，源码解析为 `src/parser.ts`，include 和作用域索引为 `src/workspaceIndex.ts`。
 
 集成测试覆盖原生 ShaderLab 和 Unity 扩展的 `UnityShader` 模式，包括自动激活、include 和精确符号跳转、重载候选、局部变量/参数/结构体字段、cbuffer、补全、外部 include 库、内建函数签名、悬停、引用、重命名、文档符号、向量分量及未保存文本更新。
+
+## 0.1.2 更新
+
+新增 C# 风格语义着色、深浅两套调色板和跟随主题模式；修正关键词被当作函数、矩阵类型不完整、宏与普通大写变量混色等问题。增加语义分类、TextMate 规则和真实 VS Code 配色测试，并保留原有补全与跳转能力。
 
 ## 0.1.1 修复
 

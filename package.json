@@ -1,8 +1,8 @@
 {
   "name": "shader-code-navigator",
   "displayName": "Shader Code Navigator",
-  "description": "Standalone ShaderLab and HLSL navigation, completion, and symbol indexing for Visual Studio Code.",
-  "version": "0.1.1",
+  "description": "ShaderLab and HLSL completion, navigation, and C#-style semantic highlighting for VS Code.",
+  "version": "0.1.2",
   "publisher": "standalone-tools",
   "license": "MIT",
   "engines": {
@@ -108,6 +108,24 @@
           "default": 20000,
           "minimum": 1,
           "description": "Maximum number of shader-like files to index."
+        },
+        "shaderNavigator.highlighting.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Shader semantic highlighting in ShaderLab, HLSL, and UnityShader language modes."
+        },
+        "shaderNavigator.highlighting.style": {
+          "type": "string",
+          "enum": [
+            "csharp",
+            "theme"
+          ],
+          "default": "csharp",
+          "enumDescriptions": [
+            "C#-inspired Shader palette: green functions, teal types, blue variables. Supports dark and light themes.",
+            "Use the active theme colors for standard semantic token types."
+          ],
+          "description": "Choose the Shader palette without changing the editor theme or coloring other languages."
         }
       }
     },
@@ -117,27 +135,394 @@
           "other": true,
           "comments": false,
           "strings": true
-        }
+        },
+        "editor.semanticHighlighting.enabled": true
       },
       "[hlsl]": {
         "editor.quickSuggestions": {
           "other": true,
           "comments": false,
           "strings": true
-        }
+        },
+        "editor.semanticHighlighting.enabled": true
       },
       "[UnityShader]": {
         "editor.quickSuggestions": {
           "other": true,
           "comments": false,
           "strings": true
+        },
+        "editor.semanticHighlighting.enabled": true
+      },
+      "editor.semanticTokenColorCustomizations": {
+        "rules": {
+          "shaderFunction": {
+            "foreground": "#8FCD8F"
+          },
+          "shaderFunctionLight": {
+            "foreground": "#267326"
+          },
+          "shaderType": {
+            "foreground": "#4EC9B0"
+          },
+          "shaderTypeLight": {
+            "foreground": "#267F99"
+          },
+          "shaderBuiltinType": {
+            "foreground": "#569CD6"
+          },
+          "shaderBuiltinTypeLight": {
+            "foreground": "#0000FF"
+          },
+          "shaderVariable": {
+            "foreground": "#9CDCFE"
+          },
+          "shaderVariableLight": {
+            "foreground": "#1F377F"
+          },
+          "shaderParameter": {
+            "foreground": "#9CDCFE"
+          },
+          "shaderParameterLight": {
+            "foreground": "#1F377F"
+          },
+          "shaderProperty": {
+            "foreground": "#D4D4D4"
+          },
+          "shaderPropertyLight": {
+            "foreground": "#303030"
+          },
+          "shaderConstant": {
+            "foreground": "#4FC1FF"
+          },
+          "shaderConstantLight": {
+            "foreground": "#0070C1"
+          },
+          "shaderMacro": {
+            "foreground": "#C8A2C8"
+          },
+          "shaderMacroLight": {
+            "foreground": "#795E8A"
+          },
+          "shaderKeyword": {
+            "foreground": "#569CD6"
+          },
+          "shaderKeywordLight": {
+            "foreground": "#0000FF"
+          },
+          "shaderControl": {
+            "foreground": "#C586C0"
+          },
+          "shaderControlLight": {
+            "foreground": "#AF00DB"
+          },
+          "shaderDirective": {
+            "foreground": "#9B9B9B"
+          },
+          "shaderDirectiveLight": {
+            "foreground": "#656565"
+          },
+          "shaderSemantic": {
+            "foreground": "#D7BA7D"
+          },
+          "shaderSemanticLight": {
+            "foreground": "#795E26"
+          },
+          "shaderNumber": {
+            "foreground": "#B5CEA8"
+          },
+          "shaderNumberLight": {
+            "foreground": "#098658"
+          },
+          "shaderString": {
+            "foreground": "#CE9178"
+          },
+          "shaderStringLight": {
+            "foreground": "#A31515"
+          },
+          "shaderComment": {
+            "foreground": "#6A9955"
+          },
+          "shaderCommentLight": {
+            "foreground": "#008000"
+          },
+          "shaderOperator": {
+            "foreground": "#D4D4D4"
+          },
+          "shaderOperatorLight": {
+            "foreground": "#303030"
+          }
         }
       }
-    }
+    },
+    "semanticTokenTypes": [
+      {
+        "id": "shaderFunction",
+        "superType": "function",
+        "description": "Shader function (dark palette)"
+      },
+      {
+        "id": "shaderFunctionLight",
+        "superType": "function",
+        "description": "Shader function (light palette)"
+      },
+      {
+        "id": "shaderType",
+        "superType": "type",
+        "description": "Shader type (dark palette)"
+      },
+      {
+        "id": "shaderTypeLight",
+        "superType": "type",
+        "description": "Shader type (light palette)"
+      },
+      {
+        "id": "shaderBuiltinType",
+        "superType": "type",
+        "description": "Shader builtinType (dark palette)"
+      },
+      {
+        "id": "shaderBuiltinTypeLight",
+        "superType": "type",
+        "description": "Shader builtinType (light palette)"
+      },
+      {
+        "id": "shaderVariable",
+        "superType": "variable",
+        "description": "Shader variable (dark palette)"
+      },
+      {
+        "id": "shaderVariableLight",
+        "superType": "variable",
+        "description": "Shader variable (light palette)"
+      },
+      {
+        "id": "shaderParameter",
+        "superType": "parameter",
+        "description": "Shader parameter (dark palette)"
+      },
+      {
+        "id": "shaderParameterLight",
+        "superType": "parameter",
+        "description": "Shader parameter (light palette)"
+      },
+      {
+        "id": "shaderProperty",
+        "superType": "property",
+        "description": "Shader property (dark palette)"
+      },
+      {
+        "id": "shaderPropertyLight",
+        "superType": "property",
+        "description": "Shader property (light palette)"
+      },
+      {
+        "id": "shaderConstant",
+        "superType": "variable",
+        "description": "Shader constant (dark palette)"
+      },
+      {
+        "id": "shaderConstantLight",
+        "superType": "variable",
+        "description": "Shader constant (light palette)"
+      },
+      {
+        "id": "shaderMacro",
+        "superType": "macro",
+        "description": "Shader macro (dark palette)"
+      },
+      {
+        "id": "shaderMacroLight",
+        "superType": "macro",
+        "description": "Shader macro (light palette)"
+      },
+      {
+        "id": "shaderKeyword",
+        "superType": "keyword",
+        "description": "Shader keyword (dark palette)"
+      },
+      {
+        "id": "shaderKeywordLight",
+        "superType": "keyword",
+        "description": "Shader keyword (light palette)"
+      },
+      {
+        "id": "shaderControl",
+        "superType": "keyword",
+        "description": "Shader control (dark palette)"
+      },
+      {
+        "id": "shaderControlLight",
+        "superType": "keyword",
+        "description": "Shader control (light palette)"
+      },
+      {
+        "id": "shaderDirective",
+        "superType": "keyword",
+        "description": "Shader directive (dark palette)"
+      },
+      {
+        "id": "shaderDirectiveLight",
+        "superType": "keyword",
+        "description": "Shader directive (light palette)"
+      },
+      {
+        "id": "shaderSemantic",
+        "superType": "enumMember",
+        "description": "Shader semantic (dark palette)"
+      },
+      {
+        "id": "shaderSemanticLight",
+        "superType": "enumMember",
+        "description": "Shader semantic (light palette)"
+      },
+      {
+        "id": "shaderNumber",
+        "superType": "number",
+        "description": "Shader number (dark palette)"
+      },
+      {
+        "id": "shaderNumberLight",
+        "superType": "number",
+        "description": "Shader number (light palette)"
+      },
+      {
+        "id": "shaderString",
+        "superType": "string",
+        "description": "Shader string (dark palette)"
+      },
+      {
+        "id": "shaderStringLight",
+        "superType": "string",
+        "description": "Shader string (light palette)"
+      },
+      {
+        "id": "shaderComment",
+        "superType": "comment",
+        "description": "Shader comment (dark palette)"
+      },
+      {
+        "id": "shaderCommentLight",
+        "superType": "comment",
+        "description": "Shader comment (light palette)"
+      },
+      {
+        "id": "shaderOperator",
+        "superType": "operator",
+        "description": "Shader operator (dark palette)"
+      },
+      {
+        "id": "shaderOperatorLight",
+        "superType": "operator",
+        "description": "Shader operator (light palette)"
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "scopes": {
+          "shaderFunction": [
+            "entity.name.function"
+          ],
+          "shaderFunctionLight": [
+            "entity.name.function"
+          ],
+          "shaderType": [
+            "entity.name.type"
+          ],
+          "shaderTypeLight": [
+            "entity.name.type"
+          ],
+          "shaderBuiltinType": [
+            "storage.type"
+          ],
+          "shaderBuiltinTypeLight": [
+            "storage.type"
+          ],
+          "shaderVariable": [
+            "variable.other.readwrite"
+          ],
+          "shaderVariableLight": [
+            "variable.other.readwrite"
+          ],
+          "shaderParameter": [
+            "variable.parameter"
+          ],
+          "shaderParameterLight": [
+            "variable.parameter"
+          ],
+          "shaderProperty": [
+            "variable.other.property"
+          ],
+          "shaderPropertyLight": [
+            "variable.other.property"
+          ],
+          "shaderConstant": [
+            "variable.other.constant"
+          ],
+          "shaderConstantLight": [
+            "variable.other.constant"
+          ],
+          "shaderMacro": [
+            "entity.name.function.preprocessor"
+          ],
+          "shaderMacroLight": [
+            "entity.name.function.preprocessor"
+          ],
+          "shaderKeyword": [
+            "keyword.other"
+          ],
+          "shaderKeywordLight": [
+            "keyword.other"
+          ],
+          "shaderControl": [
+            "keyword.control"
+          ],
+          "shaderControlLight": [
+            "keyword.control"
+          ],
+          "shaderDirective": [
+            "keyword.preprocessor"
+          ],
+          "shaderDirectiveLight": [
+            "keyword.preprocessor"
+          ],
+          "shaderSemantic": [
+            "entity.name.label"
+          ],
+          "shaderSemanticLight": [
+            "entity.name.label"
+          ],
+          "shaderNumber": [
+            "constant.numeric"
+          ],
+          "shaderNumberLight": [
+            "constant.numeric"
+          ],
+          "shaderString": [
+            "string.quoted.double"
+          ],
+          "shaderStringLight": [
+            "string.quoted.double"
+          ],
+          "shaderComment": [
+            "comment"
+          ],
+          "shaderCommentLight": [
+            "comment"
+          ],
+          "shaderOperator": [
+            "keyword.operator"
+          ],
+          "shaderOperatorLight": [
+            "keyword.operator"
+          ]
+        }
+      }
+    ]
   },
   "scripts": {
     "compile": "tsc -p ./",
-    "test": "npm run compile && node ./out/test/parser.test.js",
+    "test": "npm run compile && node ./out/test/parser.test.js && node ./out/test/highlighting.test.js && node ./scripts/test-grammar.cjs",
     "package": "npm run compile",
     "vsix": "npm run compile && npx --yes @vscode/vsce package --no-dependencies",
     "test:integration": "npm run compile && node scripts/integration.cjs"
@@ -146,7 +531,9 @@
     "@types/node": "^20.14.0",
     "@types/vscode": "^1.85.0",
     "@vscode/test-electron": "^3.1.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.3.2"
   },
   "repository": {
     "type": "git",
