@@ -2,7 +2,7 @@
   "name": "shader-code-navigator",
   "displayName": "Shader Code Navigator",
   "description": "ShaderLab and HLSL completion, navigation, and C#-style semantic highlighting for VS Code.",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publisher": "standalone-tools",
   "license": "MIT",
   "engines": {
@@ -20,7 +20,8 @@
     "onLanguage:UnityShader",
     "onStartupFinished",
     "onCommand:shaderNavigator.diagnose",
-    "onCommand:shaderNavigator.showProgress"
+    "onCommand:shaderNavigator.showProgress",
+    "onCommand:shaderNavigator.clearCache"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -81,6 +82,10 @@
       {
         "command": "shaderNavigator.showProgress",
         "title": "Shader Navigator: Show Loading Progress"
+      },
+      {
+        "command": "shaderNavigator.clearCache",
+        "title": "Shader Navigator: Clear Persistent Cache"
       }
     ],
     "configuration": {
@@ -131,6 +136,11 @@
             "Use the active theme colors for standard semantic token types."
           ],
           "description": "Choose the Shader palette without changing the editor theme or coloring other languages."
+        },
+        "shaderNavigator.cache.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Persist the Shader index in VS Code extension storage so unchanged files can be restored after restart."
         }
       }
     },

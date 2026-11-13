@@ -69,7 +69,7 @@ function referenceLocations(index: ShaderWorkspaceIndex, document: vscode.TextDo
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-  const index = new ShaderWorkspaceIndex();
+  const index = new ShaderWorkspaceIndex(context.globalStorageUri);
   const highlighting = new ShaderSemanticHighlighting(index);
   const progress = new ShaderIndexProgress(index);
   const output = vscode.window.createOutputChannel('Shader Code Navigator');
@@ -92,6 +92,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.workspace.onDidChangeWorkspaceFolders(async () => { await index.rebuild(); updateStatus(); }),
     vscode.workspace.onDidChangeConfiguration(async (event) => { if (event.affectsConfiguration('shaderNavigator')) { if (event.affectsConfiguration('shaderNavigator.includePaths') || event.affectsConfiguration('shaderNavigator.exclude') || event.affectsConfiguration('shaderNavigator.maxFiles')) { await index.rebuild(); updateStatus(); } highlighting.refresh(); } }),
     vscode.commands.registerCommand('shaderNavigator.rebuildIndex', async () => { await index.rebuild(); highlighting.refresh(); updateStatus(); void vscode.window.showInformationMessage('Shader Navigator indexed ' + index.getDocumentCount() + ' files.' + (index.truncated ? ' Index limit reached.' : '')); }),
+    vscode.commands.registerCommand('shaderNavigator.clearCache', async () => { await index.clearPersistentCache(); await index.rebuild(); highlighting.refresh(); updateStatus(); void vscode.window.showInformationMessage('Shader Navigator persistent cache cleared.'); }),
     vscode.commands.registerCommand('shaderNavigator.openSymbolSearch', () => vscode.commands.executeCommand('workbench.action.showAllSymbols')),
     vscode.commands.registerCommand('shaderNavigator.diagnose', async () => {
       const document = vscode.window.activeTextEditor?.document;

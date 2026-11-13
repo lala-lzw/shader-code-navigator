@@ -11,6 +11,7 @@ class Emitter {
   dispose(){this.listeners.clear();}
 }
 const disk = new Map();
+const storage = new Map();
 const counters = {reads:0,stats:0};
 let discoveryGate, readGate;
 const documents = [];
@@ -18,7 +19,7 @@ const config = {exclude:[],maxFiles:20000,includePaths:[]};
 const commandHandlers=new Map(), notifications=[];
 const status={text:'',tooltip:'',show(){},hide(){},dispose(){}};
 const mock = {
-  EventEmitter:Emitter, Uri:{file:uriPath=>uri(path.relative(root,uriPath))}, FileType:{File:1},
+  EventEmitter:Emitter, Uri:{file:uriPath=>uri(path.relative(root,uriPath)), joinPath:(base,...parts)=>uri(path.relative(root,path.join(base.fsPath,...parts))), parse:value=>uri(decodeURIComponent(value.replace(/^file:\/\//,'').replace(/^\//,'').replace(/\//g,path.sep)))}, FileType:{File:1},
   RelativePattern:class {constructor(base,pattern){this.base=base;this.pattern=pattern;}},
   StatusBarAlignment:{Left:1},ProgressLocation:{Notification:15},
   commands:{registerCommand:(name,handler)=>{commandHandlers.set(name,handler);return {dispose:()=>commandHandlers.delete(name)};},executeCommand:()=>{}},
@@ -37,8 +38,11 @@ const mock = {
     asRelativePath:target=>path.relative(root,target.fsPath),
     findFiles:async()=>{if(discoveryGate){await discoveryGate;}return [...disk.keys()].map(file=>uri(file));},
     fs:{
-      stat:async target=>{counters.stats++;if(!disk.has(path.relative(root,target.fsPath))){throw new Error('not found');}return {type:1};},
-      readFile:async target=>{counters.reads++;if(readGate){await readGate;}const value=disk.get(path.relative(root,target.fsPath));if(value===undefined){throw new Error('not found');}return Buffer.from(value);}
+      stat:async target=>{counters.stats++;const relative=path.relative(root,target.fsPath);if(storage.has(relative)){return {type:1,size:storage.get(relative).length,mtime:1};}if(!disk.has(relative)){throw new Error('not found');}return {type:1,size:Buffer.byteLength(disk.get(relative)),mtime:1};},
+      readFile:async target=>{counters.reads++;if(readGate){await readGate;}const relative=path.relative(root,target.fsPath);const value=storage.has(relative)?storage.get(relative):disk.get(relative);if(value===undefined){throw new Error('not found');}return Buffer.from(value);},
+      writeFile:async(target,data)=>{storage.set(path.relative(root,target.fsPath),Buffer.from(data).toString('utf8'));},
+      createDirectory:async()=>{},
+      delete:async target=>{storage.delete(path.relative(root,target.fsPath));}
     }
   }
 };
@@ -54,7 +58,7 @@ const wait=()=>new Promise(resolve=>setImmediate(resolve));
   disk.set('Shared.hlsl','float SharedValue(float value) { return value; }');
   for(let i=0;i<40;i++){disk.set('Library'+i+'.hlsl','#include "Shared.hlsl"\nfloat Library'+i+'(float value) { return SharedValue(value); }');}
   const main=open('Main.shader',Array.from({length:40},(_,i)=>'#include "Library'+i+'.hlsl"').join('\n')+'\nfloat MainFunction(float value) { return Library0(value); }');
-  const index=new ShaderWorkspaceIndex();
+  const index=new ShaderWorkspaceIndex(uri('cache'));
   mock.window.activeTextEditor={document:main};
   const progressUI=new ShaderIndexProgress(index);
   const events=[];index.onDidProgress(state=>events.push(state));
@@ -129,6 +133,23 @@ const wait=()=>new Promise(resolve=>setImmediate(resolve));
   assert.ok(notifications[1].done,'Cancelled scan closes its progress notification');
   await index.ensureDocument(main);
   assert.ok(index.resolve(main.uri,main.text.length,'RestoredValue').length,'Active document stays usable after cancelling background work');
+  // Persisted cache survives a fresh index instance and avoids reading unchanged sources.
+  await index.flushPersistentCache();
+  const readsBeforeRestore = counters.reads;
+  const restoredIndex = new ShaderWorkspaceIndex(uri('cache'));
+  await restoredIndex.initialize();
+  assert.ok(restoredIndex.getStatistics().persistentCacheHits >= 41, 'Fresh index restores unchanged files from disk cache');
+  assert.strictEqual(counters.reads, readsBeforeRestore + 1 + 120, 'Fresh index reads the cache file and only new sources');
+  assert.ok(restoredIndex.getDocumentCount() >= 41, 'Restored cache contains parsed dependency documents');
+  disk.set('Library0.hlsl', '#include "Shared.hlsl"\nfloat Library0Changed(float value) { return SharedValue(value); }');
+  const changedIndex = new ShaderWorkspaceIndex(uri('cache'));
+  await changedIndex.initialize();
+  assert.ok(changedIndex.getStatistics().persistentCacheHits < restoredIndex.getStatistics().persistentCacheHits, 'Changed files miss the persistent cache');
+  await changedIndex.clearPersistentCache();
+  const emptyIndex = new ShaderWorkspaceIndex(uri('cache'));
+  await emptyIndex.initialize();
+  assert.strictEqual(emptyIndex.getStatistics().persistentCacheHits, 0, 'Clear Persistent Cache removes disk entries');
+  restoredIndex.dispose(); changedIndex.dispose(); emptyIndex.dispose();
   progressUI.dispose();index.dispose();
   console.log('PASS: immediate local symbols, coalesced reads, edit/reopen caches, invalidation, cycles, real progress counts and background cancellation.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

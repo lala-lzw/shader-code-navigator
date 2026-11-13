@@ -33,6 +33,7 @@ export class ShaderIndexProgress implements vscode.Disposable {
   }
 
   private message(state: IndexProgress): string {
+    if (state.phase === 'restoring') { return '恢复磁盘缓存 ' + state.completed + '/' + state.total; }
     if (state.phase === 'discovering') { return '正在发现 Shader 文件…'; }
     const phase = state.phase === 'includes' ? '加载 include' : '扫描文件';
     return phase + ' ' + state.completed + '/' + state.total + (state.file ? ' · ' + path.basename(state.file) : '');

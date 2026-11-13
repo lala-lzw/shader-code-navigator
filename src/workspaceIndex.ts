@@ -1,4 +1,5 @@
 import * as path from 'path';
+import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 import { isShaderFileName, ParsedShaderDocument, SHADER_EXTENSIONS, ShaderSymbol } from './model';
 import { identifierAt, parseShaderDocument } from './parser';
@@ -8,10 +9,24 @@ export interface IndexedSymbolLocation { uri: vscode.Uri; symbol: ShaderSymbol }
 export interface IncludeCandidate { label: string; uri: vscode.Uri }
 export interface IndexProgress {
   id: number; background: boolean; title: string;
-  phase: 'discovering' | 'parsing' | 'includes' | 'done' | 'cancelled' | 'failed';
+  phase: 'restoring' | 'discovering' | 'parsing' | 'includes' | 'done' | 'cancelled' | 'failed';
   completed: number; total: number; file?: string; cancel?: () => void;
 }
-export interface IndexStatistics { parses: number; reads: number; statChecks: number; cacheHits: number }
+export interface IndexStatistics { parses: number; reads: number; statChecks: number; cacheHits: number; persistentCacheHits: number; cacheWrites: number }
+
+interface PersistedDocument {
+  uri: string;
+  size: number;
+  mtime: number;
+  text: string;
+  parsed: ParsedShaderDocument;
+}
+
+interface PersistedIndex {
+  version: 1;
+  workspaceKey: string;
+  documents: PersistedDocument[];
+}
 
 const key = (uri: vscode.Uri): string => process.platform === 'win32' ? uri.fsPath.toLowerCase() : uri.fsPath;
 const slash = (text: string): string => text.replace(/\\/g, '/');
@@ -33,7 +48,14 @@ export class ShaderWorkspaceIndex implements vscode.Disposable {
   private readonly progress = new vscode.EventEmitter<IndexProgress>();
   public readonly onDidChange = this.changed.event;
   public readonly onDidProgress = this.progress.event;
-  private readonly stats: IndexStatistics = { parses: 0, reads: 0, statChecks: 0, cacheHits: 0 };
+  private readonly stats: IndexStatistics = { parses: 0, reads: 0, statChecks: 0, cacheHits: 0, persistentCacheHits: 0, cacheWrites: 0 };
+  private readonly cacheRoot?: vscode.Uri;
+  private readonly cacheFile?: vscode.Uri;
+  private readonly cacheWorkspaceKey: string;
+  private readonly persisted = new Map<string, PersistedDocument>();
+  private readonly metadata = new Map<string, { size: number; mtime: number }>();
+  private cacheLoaded?: Promise<void>;
+  private cacheWriteTimer?: ReturnType<typeof setTimeout>;
   private rebuilding?: Promise<void>;
   private revision = 0;
   private graphEpoch = 0;
@@ -44,8 +66,24 @@ export class ShaderWorkspaceIndex implements vscode.Disposable {
   public truncated = false;
   public paused = false;
 
+  public constructor(cacheRoot?: vscode.Uri) {
+    this.cacheRoot = cacheRoot && vscode.workspace.getConfiguration('shaderNavigator').get<boolean>('cache.enabled', true) ? cacheRoot : undefined;
+    const workspaceRoots = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.toString()).join('|') || 'no-workspace';
+    this.cacheWorkspaceKey = workspaceRoots;
+    if (cacheRoot) {
+      const digest = crypto.createHash('sha1').update(workspaceRoots).digest('hex').slice(0, 16);
+      this.cacheFile = vscode.Uri.joinPath(cacheRoot, 'index-' + digest + '.json');
+    }
+  }
+
   public initialize(): Promise<void> { return this.rebuild(); }
   public getStatistics(): IndexStatistics { return { ...this.stats }; }
+  public async clearPersistentCache(): Promise<void> {
+    this.persisted.clear();
+    if (this.cacheWriteTimer) { clearTimeout(this.cacheWriteTimer); this.cacheWriteTimer = undefined; }
+    if (this.cacheFile) { try { await vscode.workspace.fs.delete(this.cacheFile); } catch { /* Cache may not exist. */ } }
+  }
+  public flushPersistentCache(): Promise<void> { return this.writePersistentCache(); }
   public getDocumentCount(): number { return this.documents.size; }
   public isReady(uri: vscode.Uri): boolean { return this.ready.has(key(uri)); }
 
@@ -57,7 +95,7 @@ export class ShaderWorkspaceIndex implements vscode.Disposable {
 
   private async scan(): Promise<void> {
     let cancelled = false;
-    const job: IndexProgress = { id: ++this.nextJob, background: true, title: 'Shader Navigator: 扫描工作区', phase: 'discovering', completed: 0, total: 0, cancel: () => { cancelled = true; } };
+    const job: IndexProgress = { id: ++this.nextJob, background: true, title: 'Shader Navigator: 扫描工作区', phase: 'restoring', completed: 0, total: 0, cancel: () => { cancelled = true; } };
     this.truncated = false; this.paused = false;
     const cachedBeforeScan = new Set(this.documents.keys());
     this.invalidateResolution();
@@ -65,6 +103,10 @@ export class ShaderWorkspaceIndex implements vscode.Disposable {
     for (const document of vscode.workspace.textDocuments) { this.ensureLocalDocument(document); }
     this.progress.fire({ ...job });
     try {
+      await this.loadPersistentCache();
+      if (cancelled || this.disposed) { job.phase = 'cancelled'; this.progress.fire({ ...job }); return; }
+      job.phase = 'discovering';
+      this.progress.fire({ ...job });
       const config = vscode.workspace.getConfiguration('shaderNavigator');
       const excludes = config.get<string[]>('exclude', []);
       const exclude = excludes.length > 1 ? '{' + excludes.join(',') + '}' : excludes[0];
@@ -85,21 +127,32 @@ export class ShaderWorkspaceIndex implements vscode.Disposable {
       for (const [documentKey, document] of this.documents) {
         if (!files.has(documentKey) && !openKeys.has(documentKey) && vscode.workspace.getWorkspaceFolder(document.uri)) { this.removeDocument(document.uri); }
       }
-      job.phase = 'parsing'; job.total = uris.length;
+      job.phase = 'restoring'; job.total = uris.length; job.completed = 0;
       this.progress.fire({ ...job });
       for (const document of vscode.workspace.textDocuments) { this.warmDocument(document); }
+      const pendingReads: vscode.Uri[] = [];
+      for (let i = 0; i < uris.length && !cancelled && !this.disposed; i += 8) {
+        const batch = uris.slice(i, i + 8);
+        const restored = await Promise.all(batch.map(async uri => openKeys.has(key(uri)) || await this.restorePersistentDocument(uri)));
+        batch.forEach((uri, offset) => { if (!restored[offset]) { pendingReads.push(uri); } });
+        job.completed = Math.min(i + batch.length, uris.length); job.file = batch[batch.length - 1]?.fsPath;
+        this.progress.fire({ ...job });
+        await nextTurn();
+      }
       // Small batches yield to editor requests. Dependency jobs take priority over background work.
-      for (let i = 0; i < uris.length && !cancelled && !this.disposed; i += 4) {
+      job.phase = 'parsing'; job.total = pendingReads.length; job.completed = 0; this.progress.fire({ ...job });
+      for (let i = 0; i < pendingReads.length && !cancelled && !this.disposed; i += 4) {
         if (this.foreground) { await new Promise<void>(resolve => this.idleWaiters.add(resolve)); }
         if (cancelled || this.disposed) { break; }
-        await Promise.all(uris.slice(i, i + 4).map(uri => this.read(uri, cachedBeforeScan.has(key(uri)))));
-        job.completed = Math.min(i + 4, uris.length); job.file = uris[job.completed - 1]?.fsPath;
+        await Promise.all(pendingReads.slice(i, i + 4).map(uri => this.read(uri, cachedBeforeScan.has(key(uri)))));
+        job.completed = Math.min(i + 4, pendingReads.length); job.file = pendingReads[job.completed - 1]?.fsPath;
         this.progress.fire({ ...job });
         await nextTurn();
       }
       this.paused = cancelled;
       job.phase = cancelled || this.disposed ? 'cancelled' : 'done';
       this.progress.fire({ ...job });
+      if (!cancelled && !this.disposed) { this.queuePersistentCacheWrite(); }
       this.changed.fire();
     } catch (error) {
       this.progress.fire({ ...job, phase: 'failed' });
@@ -153,6 +206,7 @@ export class ShaderWorkspaceIndex implements vscode.Disposable {
     this.documents.delete(documentKey); this.knownFiles.delete(documentKey);
     this.edges.delete(documentKey); this.versions.delete(documentKey);
     this.rebuildAliases(); this.invalidateResolution(); this.touch();
+    this.persisted.delete(documentKey); this.queuePersistentCacheWrite();
   }
   public getDocument(uri: vscode.Uri): IndexedShaderDocument | undefined { return this.documents.get(key(uri)); }
   public getAllDocuments(): IndexedShaderDocument[] { return [...this.documents.values()]; }
@@ -314,19 +368,24 @@ export class ShaderWorkspaceIndex implements vscode.Disposable {
       this.edges.delete(key(uri));this.ready.clear();this.graphEpoch++;
     }
     this.documents.set(key(uri),{uri,text,parsed});this.rememberFile(uri);this.touch();
+    this.queuePersistentCacheWrite();
   }
 
   private async read(uri:vscode.Uri,refresh=false):Promise<void> {
     const open=vscode.workspace.textDocuments.find(document=>key(document.uri)===key(uri));
     if(open){this.ensureLocalDocument(open);return;}
     if(this.documents.has(key(uri))&&!refresh){this.stats.cacheHits++;return;}
+    if (!refresh && await this.restorePersistentDocument(uri)) { return; }
     const previous=this.reading.get(key(uri));if(previous){await previous;return;}
     const pending=(async()=>{
       try{
         this.stats.reads++;
+        const metadata = await this.fileMetadata(uri);
         const text=Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
+        if (metadata) { this.metadata.set(key(uri), metadata); }
         const live=vscode.workspace.textDocuments.find(document=>key(document.uri)===key(uri));
         if(live){this.ensureLocalDocument(live);}else if(!this.disposed){this.store(uri,text);}
+        this.queuePersistentCacheWrite();
       }catch{this.documents.delete(key(uri));this.knownFiles.delete(key(uri));this.edges.delete(key(uri));this.versions.delete(key(uri));this.rebuildAliases();this.touch();}
     })();
     this.reading.set(key(uri),pending);
@@ -348,6 +407,61 @@ export class ShaderWorkspaceIndex implements vscode.Disposable {
   private invalidateResolution():void {this.resolutions.clear();this.edges.clear();this.ready.clear();this.graphEpoch++;this.touch();}
   private touch():void {this.revision++;this.visibility.clear();}
 
+  private async fileMetadata(uri: vscode.Uri): Promise<{size:number;mtime:number}|undefined> {
+    try { const stat = await vscode.workspace.fs.stat(uri); return {size: stat.size, mtime: stat.mtime}; } catch { return undefined; }
+  }
+
+  private async loadPersistentCache(): Promise<void> {
+    if (!this.cacheFile) { return; }
+    if (this.cacheLoaded) { return this.cacheLoaded; }
+    this.cacheLoaded = (async () => {
+      try {
+        const raw = Buffer.from(await vscode.workspace.fs.readFile(this.cacheFile!)).toString('utf8');
+        const payload = JSON.parse(raw) as PersistedIndex;
+        if (payload.version !== 1 || payload.workspaceKey !== this.cacheWorkspaceKey || !Array.isArray(payload.documents)) { return; }
+        for (const document of payload.documents) {
+          if (document.uri && document.text !== undefined && document.parsed) { this.persisted.set(key(vscode.Uri.parse(document.uri)), document); }
+        }
+      } catch { /* First launch or corrupt cache falls back to source files. */ }
+    })();
+    return this.cacheLoaded;
+  }
+
+  private async restorePersistentDocument(uri: vscode.Uri): Promise<boolean> {
+    const entry = this.persisted.get(key(uri));
+    if (!entry) { return false; }
+    const metadata = await this.fileMetadata(uri);
+    if (!metadata || metadata.size !== entry.size || metadata.mtime !== entry.mtime) { this.persisted.delete(key(uri)); return false; }
+    this.metadata.set(key(uri), metadata);
+    this.documents.set(key(uri), {uri, text: entry.text, parsed: entry.parsed});
+    this.rememberFile(uri); this.touch(); this.stats.persistentCacheHits++;
+    return true;
+  }
+
+  private queuePersistentCacheWrite(): void {
+    if (!this.cacheFile || this.disposed) { return; }
+    if (this.cacheWriteTimer) { clearTimeout(this.cacheWriteTimer); }
+    this.cacheWriteTimer = setTimeout(() => { this.cacheWriteTimer = undefined; void this.writePersistentCache(); }, 1200);
+  }
+
+  private async writePersistentCache(): Promise<void> {
+    if (!this.cacheFile || this.disposed) { return; }
+    try {
+      await vscode.workspace.fs.createDirectory(this.cacheRoot!);
+      const documents: PersistedDocument[] = [];
+      for (const document of this.documents.values()) {
+        if (vscode.workspace.textDocuments.some(open => key(open.uri) === key(document.uri))) { continue; }
+        const metadata = this.metadata.get(key(document.uri)) ?? await this.fileMetadata(document.uri);
+        if (!metadata) { continue; }
+        this.metadata.set(key(document.uri), metadata);
+        documents.push({uri: document.uri.toString(), size: metadata.size, mtime: metadata.mtime, text: document.text, parsed: document.parsed});
+      }
+      const payload: PersistedIndex = {version: 1, workspaceKey: this.cacheWorkspaceKey, documents};
+      await vscode.workspace.fs.writeFile(this.cacheFile, Buffer.from(JSON.stringify(payload), 'utf8'));
+      this.stats.cacheWrites++;
+    } catch { /* Disk cache is an optimization and must never block editing. */ }
+  }
+
   private configuredRoots():string[]{
     const roots:string[]=[];
     for(const configured of vscode.workspace.getConfiguration('shaderNavigator').get<string[]>('includePaths',[])){
@@ -357,5 +471,5 @@ export class ShaderWorkspaceIndex implements vscode.Disposable {
     return [...new Set(roots)];
   }
   private async isFile(uri:vscode.Uri):Promise<boolean>{try{this.stats.statChecks++;return((await vscode.workspace.fs.stat(uri)).type&vscode.FileType.File)!==0;}catch{return false;}}
-  public dispose():void {this.disposed=true;for(const resolve of this.idleWaiters){resolve();}this.idleWaiters.clear();this.changed.dispose();this.progress.dispose();}
+  public dispose():void {this.disposed=true;if(this.cacheWriteTimer){clearTimeout(this.cacheWriteTimer);this.cacheWriteTimer=undefined;}for(const resolve of this.idleWaiters){resolve();}this.idleWaiters.clear();this.changed.dispose();this.progress.dispose();}
 }
