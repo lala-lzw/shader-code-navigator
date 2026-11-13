@@ -4,6 +4,7 @@ import { isShaderFileName, ShaderSymbolKind } from './model';
 import { IndexedSymbolLocation, ShaderWorkspaceIndex } from './workspaceIndex';
 import { intrinsics, keywords } from './builtins';
 import { ShaderSemanticHighlighting, shaderTokenLegend } from './semanticHighlighting';
+import { ShaderIndexProgress } from './indexProgress';
 
 // Unity's official extension uses UnityShader for both ShaderLab and HLSL.
 // Match file extensions too so another syntax extension can keep its language ID.
@@ -70,50 +71,56 @@ function referenceLocations(index: ShaderWorkspaceIndex, document: vscode.TextDo
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const index = new ShaderWorkspaceIndex();
   const highlighting = new ShaderSemanticHighlighting(index);
+  const progress = new ShaderIndexProgress(index);
   const output = vscode.window.createOutputChannel('Shader Code Navigator');
   output.appendLine('Shader Code Navigator ' + context.extension.packageJSON.version + ' activated.');
-  let scanning = true;
   const prepare = async (document: vscode.TextDocument) => { await index.ensureDocument(document); };
-  const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 10);
-  status.command = 'shaderNavigator.rebuildIndex';
-  const updateStatus = () => {
-    status.text = (scanning ? '$(sync~spin)' : '$(symbol-namespace)') + ' Shader: ' + index.getAllDocuments().length + (index.truncated ? '+' : '');
-    status.tooltip = index.truncated ? 'Index limit reached. Increase shaderNavigator.maxFiles.' : 'Shader Code Navigator: rebuild index';
-    if (vscode.window.activeTextEditor && isShaderFileName(vscode.window.activeTextEditor.document.fileName)) { status.show(); } else { status.hide(); }
-  };
+  const updateStatus = () => progress.updateStatus();
   updateStatus();
   const watcher = vscode.workspace.createFileSystemWatcher('**/*.{shader,shaderlab,hlsl,hlsli,cginc,compute,inc}');
-  context.subscriptions.push(status, watcher, output, highlighting,
+  context.subscriptions.push(index, progress, watcher, output, highlighting,
+    index.onDidChange(() => { highlighting.refresh(); updateStatus(); }),
     vscode.languages.registerDocumentSemanticTokensProvider(selector, highlighting, shaderTokenLegend),
     vscode.window.onDidChangeActiveColorTheme(() => highlighting.refresh()),
-    watcher.onDidCreate(async (uri) => { await index.updateDocumentFromUri(uri); await index.refreshIncludes(); highlighting.refresh(); updateStatus(); }),
+    watcher.onDidCreate(async (uri) => { await index.updateDocumentFromUri(uri); highlighting.refresh(); updateStatus(); }),
     watcher.onDidChange(async (uri) => { await index.updateDocumentFromUri(uri); highlighting.refresh(); updateStatus(); }),
-    watcher.onDidDelete(async (uri) => { index.removeDocument(uri); await index.refreshIncludes(); highlighting.refresh(); updateStatus(); }),
-    vscode.workspace.onDidOpenTextDocument(async (document) => { await index.updateDocument(document); updateStatus(); }),
-    vscode.workspace.onDidChangeTextDocument(async (event) => { await index.updateDocument(event.document); if (isShaderFileName(event.document.fileName)) { highlighting.refresh(); } }),
+    watcher.onDidDelete((uri) => { index.removeDocument(uri); for (const editor of vscode.window.visibleTextEditors) { index.warmDocument(editor.document); } highlighting.refresh(); updateStatus(); }),
+    vscode.workspace.onDidOpenTextDocument((document) => { index.warmDocument(document); updateStatus(); }),
+    vscode.workspace.onDidChangeTextDocument((event) => { index.warmDocument(event.document); if (isShaderFileName(event.document.fileName)) { highlighting.refresh(); } }),
     vscode.workspace.onDidCloseTextDocument(async (document) => { await index.updateDocumentFromUri(document.uri); }),
-    vscode.window.onDidChangeActiveTextEditor(updateStatus),
+    vscode.window.onDidChangeActiveTextEditor(editor => { if (editor) { index.warmDocument(editor.document); } updateStatus(); }),
     vscode.workspace.onDidChangeWorkspaceFolders(async () => { await index.rebuild(); updateStatus(); }),
     vscode.workspace.onDidChangeConfiguration(async (event) => { if (event.affectsConfiguration('shaderNavigator')) { if (event.affectsConfiguration('shaderNavigator.includePaths') || event.affectsConfiguration('shaderNavigator.exclude') || event.affectsConfiguration('shaderNavigator.maxFiles')) { await index.rebuild(); updateStatus(); } highlighting.refresh(); } }),
-    vscode.commands.registerCommand('shaderNavigator.rebuildIndex', async () => { await index.rebuild(); highlighting.refresh(); updateStatus(); void vscode.window.showInformationMessage('Shader Navigator indexed ' + index.getAllDocuments().length + ' files.' + (index.truncated ? ' Index limit reached.' : '')); }),
+    vscode.commands.registerCommand('shaderNavigator.rebuildIndex', async () => { await index.rebuild(); highlighting.refresh(); updateStatus(); void vscode.window.showInformationMessage('Shader Navigator indexed ' + index.getDocumentCount() + ' files.' + (index.truncated ? ' Index limit reached.' : '')); }),
     vscode.commands.registerCommand('shaderNavigator.openSymbolSearch', () => vscode.commands.executeCommand('workbench.action.showAllSymbols')),
     vscode.commands.registerCommand('shaderNavigator.diagnose', async () => {
       const document = vscode.window.activeTextEditor?.document;
       output.show(true);
       if (!document || !isShaderFileName(document.fileName)) { output.appendLine('Open a Shader/HLSL file first.'); return; }
       await prepare(document);
-      output.appendLine('Active file: ' + document.fileName + '\nLanguage: ' + document.languageId + '\nProvider match: ' + vscode.languages.match(selector, document) + '\nIndexed files: ' + index.getAllDocuments().length + '\nSymbols in active file: ' + (index.getDocument(document.uri)?.parsed.symbols.length ?? 0));
+      output.appendLine('Active file: ' + document.fileName + '\nLanguage: ' + document.languageId + '\nProvider match: ' + vscode.languages.match(selector, document) + '\nIndexed files: ' + index.getDocumentCount() + '\nSymbols in active file: ' + (index.getDocument(document.uri)?.parsed.symbols.length ?? 0));
+      output.appendLine('Session cache / I/O: ' + JSON.stringify(index.getStatistics()));
       for (const include of index.getIncludes(document.uri)) { output.appendLine('Include ' + include.path + ' -> ' + ((await index.resolveInclude(document.uri, include.path))?.fsPath ?? 'unresolved')); }
     }),
     vscode.languages.registerDefinitionProvider(selector, { async provideDefinition(document, position) {
-      await prepare(document);
+      index.ensureLocalDocument(document);
       const include = includeAt(index, document, position);
       if (include) { const target = await index.resolveInclude(document.uri, include.path); return target ? new vscode.Location(target, new vscode.Position(0, 0)) : undefined; }
       const word = current(document, position);
+      if (word && inCode(index, document, position)) {
+        const local = index.resolve(document.uri, word.offset, word.name).filter(entry => entry.uri.toString() === document.uri.toString());
+        if (local.some(entry => entry.symbol.scope)) { return local.map(entry => new vscode.Location(entry.uri, symbolRange(index,entry))); }
+      }
+      await prepare(document);
       return word && inCode(index, document, position) ? index.resolve(document.uri, word.offset, word.name).map((entry) => new vscode.Location(entry.uri, symbolRange(index, entry))) : [];
     }}),
     vscode.languages.registerCompletionItemProvider(selector, { async provideCompletionItems(document, position) {
-      await prepare(document);
+      index.ensureLocalDocument(document);
+      // Offer local/intrinsic candidates within one short frame budget. VS Code
+      // requests incomplete lists again as the user keeps typing.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try { await Promise.race([prepare(document), new Promise<void>(resolve => { timer = setTimeout(resolve, 50); })]); }
+      finally { if (timer) { clearTimeout(timer); } }
       const before = document.lineAt(position.line).text.slice(0, position.character);
       const include = /#\s*include(?:_with_pragmas)?\s*[<"]([^>"]*)$/.exec(before);
       if (include) {
@@ -163,7 +170,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           item.range = word?.range; item.detail = intrinsics[name]?.join('\n') ?? 'HLSL / ShaderLab'; item.sortText = '1_' + name; items.push(item);
         }
       }
-      return items;
+      return new vscode.CompletionList(items, !index.isReady(document.uri));
     }}, '.', '"', '<', '/'),
     vscode.languages.registerHoverProvider(selector, { async provideHover(document, position) {
       await prepare(document);
@@ -194,13 +201,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       for (const include of index.getIncludes(document.uri)) { const target = await index.resolveInclude(document.uri, include.path); if (target) { links.push(new vscode.DocumentLink(range(document.getText(), include.pathRange.start, include.pathRange.end), target)); } }
       return links;
     }}),
-    vscode.languages.registerReferenceProvider(selector, { async provideReferences(document, position, referenceContext) { await prepare(document); return referenceLocations(index, document, position, referenceContext.includeDeclaration); }}),
+    vscode.languages.registerReferenceProvider(selector, { async provideReferences(document, position, referenceContext) { await prepare(document); await index.refreshIncludes(); return referenceLocations(index, document, position, referenceContext.includeDeclaration); }}),
     vscode.languages.registerRenameProvider(selector, {
       async prepareRename(document, position) { await prepare(document); const word = current(document, position); if (!word || !inCode(index, document, position) || index.resolve(document.uri, word.offset, word.name).length !== 1) { throw new Error('Rename requires one unambiguous symbol definition.'); } return word.range; },
-      async provideRenameEdits(document, position, newName) { await prepare(document); if (!/^[A-Za-z_]\w*$/.test(newName)) { throw new Error('Use a valid HLSL identifier.'); } const word = current(document, position); if (!word || index.resolve(document.uri, word.offset, word.name).length !== 1) { throw new Error('Ambiguous symbol.'); } const edit = new vscode.WorkspaceEdit(); for (const location of referenceLocations(index, document, position, true)) { edit.replace(location.uri, location.range, newName); } return edit; }
+      async provideRenameEdits(document, position, newName) { await prepare(document); await index.refreshIncludes(); if (!/^[A-Za-z_]\w*$/.test(newName)) { throw new Error('Use a valid HLSL identifier.'); } const word = current(document, position); if (!word || index.resolve(document.uri, word.offset, word.name).length !== 1) { throw new Error('Ambiguous symbol.'); } const edit = new vscode.WorkspaceEdit(); for (const location of referenceLocations(index, document, position, true)) { edit.replace(location.uri, location.range, newName); } return edit; }
     }),
     vscode.languages.registerDocumentSymbolProvider(selector, { async provideDocumentSymbols(document) {
-      await prepare(document);
+      index.ensureLocalDocument(document);
       return (index.getDocument(document.uri)?.parsed.symbols ?? []).filter((symbol) => !symbol.scope).map((symbol) => new vscode.DocumentSymbol(symbol.name, symbol.detail, kind(symbol.kind), range(document.getText(), symbol.range.start, symbol.range.end), range(document.getText(), symbol.selectionRange.start, symbol.selectionRange.end)));
     }}),
     vscode.languages.registerWorkspaceSymbolProvider({ provideWorkspaceSymbols(query) {
@@ -210,12 +217,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Register providers before a potentially large workspace scan. Requests prepare
   // the active file and its includes without waiting for unrelated files.
   void index.initialize().then(() => {
-    scanning = false;
     updateStatus();
     highlighting.refresh();
-    output.appendLine('Workspace index ready: ' + index.getAllDocuments().length + ' files.');
+    output.appendLine((index.paused ? 'Workspace index paused: ' : 'Workspace index ready: ') + index.getDocumentCount() + ' files.');
   }, (error) => {
-    scanning = false;
     updateStatus();
     output.appendLine('Workspace scan failed: ' + String(error));
     void vscode.window.showErrorMessage('Shader Navigator: workspace scan failed. See Output > Shader Code Navigator.');

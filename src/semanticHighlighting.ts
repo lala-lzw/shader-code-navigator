@@ -26,7 +26,8 @@ export class ShaderSemanticHighlighting implements vscode.DocumentSemanticTokens
     const config = vscode.workspace.getConfiguration('shaderNavigator.highlighting', document.uri);
     if (!isShaderFileName(document.fileName) || !config.get<boolean>('enabled', true)) { return undefined; }
     const version = document.version;
-    await this.index.ensureDocument(document);
+    this.index.ensureLocalDocument(document);
+    this.index.warmDocument(document);
     if (cancellation.isCancellationRequested || document.version !== version) { return undefined; }
     const indexed = this.index.getDocument(document.uri);
     if (!indexed) { return undefined; }

@@ -2,7 +2,7 @@
   "name": "shader-code-navigator",
   "displayName": "Shader Code Navigator",
   "description": "ShaderLab and HLSL completion, navigation, and C#-style semantic highlighting for VS Code.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "standalone-tools",
   "license": "MIT",
   "engines": {
@@ -19,7 +19,8 @@
     "onCommand:shaderNavigator.openSymbolSearch",
     "onLanguage:UnityShader",
     "onStartupFinished",
-    "onCommand:shaderNavigator.diagnose"
+    "onCommand:shaderNavigator.diagnose",
+    "onCommand:shaderNavigator.showProgress"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -76,6 +77,10 @@
       {
         "command": "shaderNavigator.diagnose",
         "title": "Shader Navigator: Diagnose Active File"
+      },
+      {
+        "command": "shaderNavigator.showProgress",
+        "title": "Shader Navigator: Show Loading Progress"
       }
     ],
     "configuration": {
@@ -522,10 +527,11 @@
   },
   "scripts": {
     "compile": "tsc -p ./",
-    "test": "npm run compile && node ./out/test/parser.test.js && node ./out/test/highlighting.test.js && node ./scripts/test-grammar.cjs",
+    "test": "npm run compile && node ./out/test/parser.test.js && node ./out/test/highlighting.test.js && node ./scripts/test-grammar.cjs && node ./scripts/test-index.cjs",
     "package": "npm run compile",
     "vsix": "npm run compile && npx --yes @vscode/vsce package --no-dependencies",
-    "test:integration": "npm run compile && node scripts/integration.cjs"
+    "test:integration": "npm run compile && node scripts/integration.cjs",
+    "benchmark:parser": "npm run compile && node scripts/benchmark-parser.cjs"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

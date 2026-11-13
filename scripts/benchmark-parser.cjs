@@ -1,0 +1,17 @@
+const assert=require('assert');
+const path=require('path');
+const Module=require('module');
+const {execFileSync}=require('child_process');
+const {performance}=require('perf_hooks');
+const ts=require('typescript');
+const current=require('../out/parser');
+const ref=process.argv[2]||'v0.1.2';
+const source=execFileSync('git',['show',ref+':src/parser.ts'],{encoding:'utf8'});
+const baselineModule=new Module(path.resolve(__dirname,'baseline-parser.js'),module);
+baselineModule.filename=path.resolve(__dirname,'baseline-parser.js');baselineModule.paths=module.paths;
+baselineModule._compile(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,baselineModule.filename);
+const fixture=Array.from({length:400},(_,i)=>`float4 Shade${i}(float3 input, float value) { float local = value; return float4(input * local, 1); }`).join('\n');
+const measure=parser=>{const samples=[];for(let i=0;i<6;i++){const start=performance.now();parser.parseShaderDocument(fixture);if(i){samples.push(performance.now()-start);}}return samples.sort((a,b)=>a-b)[2];};
+assert.deepStrictEqual(current.parseShaderDocument(fixture),baselineModule.exports.parseShaderDocument(fixture));
+const before=measure(baselineModule.exports),after=measure(current);
+console.log(JSON.stringify({fixture:'400 functions, '+fixture.length+' characters',samples:5,baseline:ref,baselineMedianMs:+before.toFixed(2),optimizedMedianMs:+after.toFixed(2),speedup:+(before/after).toFixed(1),symbolResults:'identical'},null,2));

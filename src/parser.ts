@@ -36,7 +36,7 @@ function splitParameters(text: string): { text: string; offset: number }[] {
   return parts;
 }
 
-function parseIncludes(source: string, code: string): ShaderInclude[] {
+function parseIncludes(source: string, code: string, lineAt: (offset: number) => number): ShaderInclude[] {
   const includes: ShaderInclude[] = [];
   const pattern = /^[ \t]*#\s*include(?:_with_pragmas)?\s*([<"])([^>"\r\n]+)[>"]/gm;
   for (const match of source.matchAll(pattern)) {
@@ -45,12 +45,20 @@ function parseIncludes(source: string, code: string): ShaderInclude[] {
     const pathStart = start + match[0].indexOf(match[2], match[0].indexOf(match[1]) + 1);
     includes.push({ path: match[2], quoted: match[1] === '"',
       range: { start, end: start + match[0].length }, pathRange: { start: pathStart, end: pathStart + match[2].length },
-      line: offsetToPosition(source, start).line });
+      line: lineAt(start) });
   }
   return includes;
 }
 
 export function parseShaderDocument(source: string): ParsedShaderDocument {
+  // Build coordinates once; rescanning the prefix for every symbol is quadratic.
+  const lineStarts = [0];
+  for (let i = 0; i < source.length; i++) { if (source[i] === '\n') { lineStarts.push(i + 1); } }
+  const lineAt = (offset: number): number => {
+    let low = 0, high = lineStarts.length;
+    while (low + 1 < high) { const middle = (low + high) >>> 1; if (lineStarts[middle] <= offset) { low = middle; } else { high = middle; } }
+    return low;
+  };
   const sanitized = sanitizeSource(source);
   // Directives contain argument-like text that must not be mistaken for declarations.
   const code = sanitized.replace(/^[ \t]*#[^\r\n]*(?:\\\r?\n[^\r\n]*)*/gm, (text) => text.replace(/[^\r\n]/g, ' '));
@@ -62,7 +70,7 @@ export function parseShaderDocument(source: string): ParsedShaderDocument {
   const functions: { body: TextRange; symbol: ShaderSymbol }[] = [];
   const aggregates: { body: TextRange; name: string; kind: 'struct' | 'cbuffer' }[] = [];
   const add = (name: string, kind: ShaderSymbol['kind'], start: number, end: number, detail: string, extra: Partial<ShaderSymbol> = {}): ShaderSymbol => {
-    const symbol: ShaderSymbol = { name, kind, detail, range: { start, end }, selectionRange: { start, end: start + name.length }, line: offsetToPosition(source, start).line, ...extra };
+    const symbol: ShaderSymbol = { name, kind, detail, range: { start, end }, selectionRange: { start, end: start + name.length }, line: lineAt(start), ...extra };
     if (!occupied.has(start)) { symbols.push(symbol); occupied.add(start); }
     return symbol;
   };
@@ -123,6 +131,9 @@ export function parseShaderDocument(source: string): ParsedShaderDocument {
     }
   }
 
+  const scopes = [...braces.entries()].sort((a, b) => a[0] - b[0]);
+  const scopeStack: [number, number][] = [];
+  let scopeCursor = 0;
   for (const match of code.matchAll(/\b(?:(?:static|const|uniform|volatile|precise|row_major|column_major|inout|in|out|groupshared)\s+)*([A-Za-z_]\w*(?:\s*<[^;{}\r\n>]+>)?)\s+([A-Za-z_]\w*)\s*(?:\[[^\]]*\]\s*)*(?=[:=;,)]|$)/g)) {
     const typeName = match[1];
     const start = match.index! + match[0].indexOf(match[2], match[0].indexOf(typeName) + typeName.length);
@@ -131,13 +142,20 @@ export function parseShaderDocument(source: string): ParsedShaderDocument {
     const aggregate = aggregates.find((item) => start > item.body.start && start < item.body.end);
     let scope: TextRange | undefined;
     if (containingFunction) {
-      const enclosing = [...braces.entries()].filter(([open, close]) => open < start && close >= start).sort((a, b) => b[0] - a[0])[0];
+      // Declarations arrive in source order, so advance the brace stack once.
+      while (scopeCursor < scopes.length && scopes[scopeCursor][0] < start) {
+        const next = scopes[scopeCursor++];
+        while (scopeStack.length && scopeStack[scopeStack.length - 1][1] < next[0]) { scopeStack.pop(); }
+        scopeStack.push(next);
+      }
+      while (scopeStack.length && scopeStack[scopeStack.length - 1][1] < start) { scopeStack.pop(); }
+      const enclosing = scopeStack[scopeStack.length - 1];
       scope = { start: enclosing?.[0] ?? containingFunction.body.start, end: Math.min(source.length, (enclosing?.[1] ?? containingFunction.body.end) + 1) };
     }
     add(match[2], 'variable', start, start + match[2].length, typeName + ' ' + match[2], { typeName, scope, containerName: containingFunction?.symbol.name ?? aggregate?.name, isMember: aggregate?.kind === 'struct' && !containingFunction, isReadonly: /\bconst\b/.test(match[0].slice(0, match[0].indexOf(typeName))) });
   }
   symbols.sort((left, right) => left.selectionRange.start - right.selectionRange.start);
-  return { symbols, includes: parseIncludes(source, sanitized), code: sanitized };
+  return { symbols, includes: parseIncludes(source, sanitized, lineAt), code: sanitized };
 }
 
 export function findIdentifierOccurrences(source: string, name: string): TextRange[] {
